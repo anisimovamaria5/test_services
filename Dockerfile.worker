@@ -1,0 +1,14 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e .
+
+COPY analytics_worker/ /app/analytics_worker/
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app/analytics_worker
+
+CMD ["python", "worker.py"]

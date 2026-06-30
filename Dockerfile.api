@@ -1,0 +1,14 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e .
+
+COPY inventory_api/ /app/inventory_api/
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app/inventory_api
+
+CMD ["python", "app.py"]
