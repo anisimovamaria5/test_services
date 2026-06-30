@@ -149,7 +149,7 @@ analytics-worker
 ```
 
 ### API запросы
-
+```bash
 # Приход товара
 curl -X POST http://localhost:8080/receipts \
   -H "Content-Type: application/json" \
@@ -165,7 +165,7 @@ curl "http://localhost:8080/stock?warehouse=WH-1&sku=A-100"
 
 # Сводка
 curl "http://localhost:8080/stock/summary?top_n=5"
-
+```
 
 ## 🧪 Тестирование
 
