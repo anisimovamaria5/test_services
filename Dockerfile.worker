@@ -6,6 +6,10 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir -e .
 
 COPY analytics_worker/ /app/analytics_worker/
+COPY shared/ /app/shared/
+COPY alembic.ini /app/alembic.ini
+COPY migrations/ /app/migrations/
+COPY tests/ /app/tests/
 
 ENV PYTHONPATH=/app
 

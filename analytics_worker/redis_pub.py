@@ -1,12 +1,10 @@
 import asyncio
 import json
-from typing import Any, Dict
 import aioredis
-from sqlalchemy import insert, select, update
 
-from analytics_worker.config import config, Channels
-from analytics_worker.database import async_engine
-from analytics_worker.models import stock_agg
+from shared.config import config, Channels
+from shared.database import async_engine
+from analytics_worker.services.stock_aggregator import StockAggregator
 from shared.logger import get_logger
 from shared.schemas import EventMessage
 
@@ -15,6 +13,7 @@ logger = get_logger(__name__)
 _redis = None
 subscriber = None
 
+aggregator = StockAggregator()
 
 async def get_redis() -> None:
     """Инициализация Redis"""
@@ -22,7 +21,7 @@ async def get_redis() -> None:
     global _redis, subscriber
     try:
         _redis = await aioredis.from_url(
-            config.redis_url,
+            (str(config.redis_url)),
             decode_responses=True, 
             max_connections=10
         )
@@ -47,49 +46,21 @@ async def close_redis() -> None:
         logger.info("Redis закрыт")
 
 
-async def handle_event(message: Dict[str, Any]) -> None:
-    """Обработка полученного события"""
-
-    data = json.loads(message['data'])
-
+async def handle_event(message: dict) -> None:
+    """Обработка полученного события (вызывает сервис)"""
     try:
+        data = json.loads(message['data'])
         event = EventMessage(**data)
     except Exception as e:
         logger.error(f"Ошибка валидации события: {e}")
         return
-
-    if event.type == Channels.RECEIPT:
-        delta = event.qty
-    elif event.type == Channels.ISSUE:
-        delta = -event.qty
-    else:
-        logger.warning(f"Неизвестный тип события: {event.type}")
-        return
-
-    async with async_engine.begin() as conn:
-        stmt = select(stock_agg).where(
-            stock_agg.c.sku == event.sku,
-            stock_agg.c.warehouse == event.warehouse
-        ) 
-        res = await conn.execute(stmt)
-        row = res.fetchone()
-
-        if row:
-           new_qty =row.total_qty + delta
-           await conn.execute(
-               update(stock_agg).where(
-                   stock_agg.c.sku == event.sku, 
-                   stock_agg.c.warehouse == event.warehouse
-               ).values(total_qty=new_qty)
-           )
-        else:
-            await conn.execute(
-                insert(stock_agg).values(
-                    sku=event.sku, 
-                    warehouse=event.warehouse, 
-                    total_qty=delta
-                )
-            )
+    
+    try:
+        async with async_engine.begin() as conn:
+            await aggregator.process_event(conn, event)
+    except Exception as e:
+        logger.error(f"Ошибка обработки события: {e}", exc_info=True)
+        raise
 
 
 async def run_worker() -> None:

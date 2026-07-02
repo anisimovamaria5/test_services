@@ -1,210 +1,144 @@
 from aiohttp import web
-from sqlalchemy import desc, func, insert, select
+from inventory_api.services import StockService
+from shared.database import async_engine
+from shared.schemas import ReceiptRequest, IssueRequest, StockResponse, SummaryResponse
+from shared.logger import get_logger
 
-from inventory_api.config import Channels
-from inventory_api.database import async_engine
-from inventory_api.models import stock_agg, stock_events
-from inventory_api.redis_pub import publish_event
-from shared.schemas import EventMessage, IssueRequest, ReceiptRequest, StockResponse, SummaryResponse, TopSkuResponse
-
+logger = get_logger(__name__)
 
 class Handlers:
-    """Класс-обработчик всех HTTP-запросов"""
-
+    """HTTP-обработчики для API"""
+    
+    def __init__(self):
+        self.stock_service = StockService()
+    
     async def post_receipts(self, request: web.Request) -> web.Response:
-        """
-            Обработчик POST /receipts
-            
-            Args:
-                request: HTTP запрос с JSON body {sku, qty, warehouse}
-                
-            Returns:
-                web.Response: JSON с статусом операции
-                
-            Пример:
-                POST /receipts
-                {"sku": "A-100", "qty": 50, "warehouse": "WH-1"}
-        """
-
-        res = await request.json()
+        """POST /receipts"""
 
         try:
-            validated = ReceiptRequest(**res)
+            data = await request.json()
+            validated = ReceiptRequest(**data)
         except Exception as e:
             return web.json_response(
-                {'error': 'Неверные данные', 'Детали': str(e)},
+                {'error': 'Неверные данные', 'detail': str(e)},
                 status=400
             )
-
-        async with async_engine.begin() as conn:
-            await conn.execute(
-                insert(stock_events).values(
-                    sku=validated.sku, 
-                    qty=validated.qty, 
-                    warehouse=validated.warehouse, 
-                    event='receipts'
-                )
-            )
-            event = EventMessage(
-                type=Channels.RECEIPT,
-                sku=validated.sku,
-                qty=validated.qty,
-                warehouse=validated.warehouse
-            )
-            await publish_event(Channels.RECEIPT, event.model_dump_json())
-
-
-        return web.json_response({'status': 'ok'})
-
-    async def post_issues(self, request: web.Request) -> web.Response:
-        """
-            Обработчик POST /issues
-            
-            Args:
-                request: HTTP запрос с JSON body {sku, qty, warehouse}
-                
-            Returns:
-                web.Response: JSON с статусом операции
-                
-            Пример:
-                POST /issues
-                {"sku": "A-100", "qty": 50, "warehouse": "WH-1"}
-        """
-
-        res = await request.json()
-
+        
         try:
-            validated = IssueRequest(**res)
-        except Exception as e:
-            return web.json_response(
-                {'error': 'Неверные данные', 'Детали': str(e)},
-                status=400
-            )
-
-        async with async_engine.begin() as conn:
-            await conn.execute(
-                insert(stock_events).values(
+            async with async_engine.begin() as conn:
+                event_id = await self.stock_service.process_receipt(
+                    conn=conn,
                     sku=validated.sku,
-                    qty=-validated.qty,
-                    warehouse=validated.warehouse,
-                    event='issue'
+                    qty=validated.qty,
+                    warehouse=validated.warehouse
                 )
+            
+            return web.json_response({
+                'status': 'ok',
+                'event_id': event_id
+            })
+            
+        except Exception as e:
+            logger.error(f"Ошибка: {e}", exc_info=True)
+            return web.json_response(
+                {'error': 'Внутренняя ошибка сервера'},
+                status=500
             )
+    
+    async def post_issues(self, request: web.Request) -> web.Response:
+        """POST /issues"""
 
-            event = EventMessage(
-                type=Channels.ISSUE,
-                sku=validated.sku,
-                qty=validated.qty,
-                warehouse=validated.warehouse
+        try:
+            data = await request.json()
+            validated = IssueRequest(**data)
+        except Exception as e:
+            return web.json_response(
+                {'error': 'Неверные данные', 'detail': str(e)},
+                status=400
             )
-            await publish_event(Channels.ISSUE, event.model_dump_json())
-
-        return web.json_response({'status': 'ok'})
+        
+        try:
+            async with async_engine.begin() as conn:
+                event_id = await self.stock_service.process_issue(
+                    conn=conn,
+                    sku=validated.sku,
+                    qty=validated.qty,
+                    warehouse=validated.warehouse
+                )
+            
+            return web.json_response({
+                'status': 'ok',
+                'event_id': event_id
+            })
+            
+        except ValueError as e:
+            return web.json_response(
+                {'error': str(e)},
+                status=400
+            )
+        except Exception as e:
+            logger.error(f"Ошибка: {e}", exc_info=True)
+            return web.json_response(
+                {'error': 'Внутренняя ошибка сервера'},
+                status=500
+            )
     
     async def get_stock(self, request: web.Request) -> web.Response:
-        """
-            Обработчик GET /stock
-            
-            Возвращает текущие остатки по указанному складу.
-            Можно фильтровать по sku.
-            
-            Args:
-                request: HTTP запрос с query параметрами
+        """GET /stock"""
 
-            Returns:
-                web.Response: JSON со списком остатков
-
-            Пример:
-            GET /stock?warehouse=WH-1&sku=A-100
-        """
-
-        sku = request.query.get('sku')
         warehouse = request.query.get('warehouse')
-
-        if not warehouse:
-                return web.json_response(
-                    {'error': 'warehouse parameter is required'},
-                    status=400
-                )
+        sku = request.query.get('sku')
         
-        query = select(stock_agg.c.sku, stock_agg.c.total_qty).where(
-            stock_agg.c.warehouse == warehouse
-        )
-        if sku:
-            query = query.where(stock_agg.c.sku == sku)
-
-        async with async_engine.connect() as conn:
-            res = await conn.execute(query)
-            rows = res.fetchall()
-
-        response = [
-                StockResponse(
-                    sku=row.sku, 
-                    total_qty=row.total_qty
-            ).model_dump()
-                for row in rows
+        if not warehouse:
+            return web.json_response(
+                {'error': 'параметр warehouse является обязательным'},
+                status=400
+            )
+        
+        try:
+            async with async_engine.connect() as conn:
+                stock = await self.stock_service.get_stock(conn, warehouse, sku)
+            
+            response = [
+                StockResponse(sku=item['sku'], total_qty=item['total_qty']).model_dump()
+                for item in stock
             ]
-
-        return web.json_response(response)
+            
+            return web.json_response(response)
+            
+        except Exception as e:
+            logger.error(f"Ошибка: {e}", exc_info=True)
+            return web.json_response(
+                {'error': 'Внутренняя ошибка сервера'},
+                status=500
+            )
     
     async def get_stock_summary(self, request: web.Request) -> web.Response:
-        """
-            Обработчик GET /stock/summary
-            
-            Возвращает агрегированную статистику по складам и топ-sku
-            
-            Args:
-                request: HTTP запрос с query параметрами
+        """GET /stock/summary"""
 
-            Returns:
-                web.Response: JSON с агрегированной статистикой
-            
-            Пример:
-                GET /stock/summary?top_n=5
-        """
-
-        top_n_param = request.query.get('top_n', 5)
-
+        top_n = request.query.get('top_n', 5)
+        
         try:
-            top_n = int(top_n_param)
+            top_n = int(top_n)
             if top_n < 1:
                 top_n = 5
         except ValueError:
             top_n = 5
+        
+        try:
+            async with async_engine.connect() as conn:
+                summary = await self.stock_service.get_summary(conn, top_n)
             
-        async with async_engine.connect() as conn:
-            data_warehouse = select(
-                stock_agg.c.warehouse,
-                func.sum(stock_agg.c.total_qty).label('total_qty'),
-                func.count(stock_agg.c.sku).label('sku_count')
-            ).group_by(stock_agg.c.warehouse)
-
-            res_warehouses = await conn.execute(data_warehouse)
-            warehouses = res_warehouses.fetchall()
-
-            data_top_skus = select(
-                stock_agg.c.sku,
-                func.sum(stock_agg.c.total_qty).label('total_qty')
-            ).group_by(stock_agg.c.sku).subquery()
-
-            top_limit = select(data_top_skus).order_by(
-                    desc(data_top_skus.c.total_qty)
-                ).limit(top_n)
-            res_top_skus = await conn.execute(top_limit)
-
-            top_skus = [
-                TopSkuResponse(sku=row.sku, total_qty=row.total_qty).model_dump()
-                for row in res_top_skus.fetchall()
-            ]
-
             response = [
-                SummaryResponse(
-                    warehouse=row.warehouse,
-                    total_qty=row.total_qty,
-                    sku_count=row.sku_count,
-                    top_skus=top_skus
-                ).model_dump()
-                for row in warehouses
+                SummaryResponse(**item).model_dump()
+                for item in summary
             ]
-
-        return web.json_response(response)
+            
+            return web.json_response(response)
+            
+        except Exception as e:
+            logger.error(f"Ошибка: {e}", exc_info=True)
+            return web.json_response(
+                {'error': 'Внутренняя ошибка сервера'},
+                status=500
+            )

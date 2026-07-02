@@ -1,6 +1,6 @@
 import aioredis
 
-from inventory_api.config import config
+from shared.config import config
 from shared.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,7 +14,7 @@ async def get_redis() -> None:
     global _redis
     try:
         _redis = await aioredis.from_url(
-            config.redis_url,
+            (str(config.redis_url)),
             decode_responses=True, 
             max_connections=10
         )

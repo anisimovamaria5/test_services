@@ -1,0 +1,17 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+
+RUN pip install --no-cache-dir -e .
+
+COPY migrations/ /app/migrations/
+COPY alembic.ini /app/alembic.ini
+COPY inventory_api/ /app/inventory_api/
+
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+CMD ["alembic", "upgrade", "head"]

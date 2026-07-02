@@ -1,7 +1,7 @@
 from aiohttp import web
 
-from inventory_api.database import get_db, close_db
-from inventory_api.config import config
+from shared.database import check_db_connection, close_db
+from shared.config import config
 from inventory_api.handlers import Handlers
 from inventory_api.redis_pub import get_redis, close_redis
 
@@ -20,45 +20,30 @@ def create_app() -> web.Application:
     app.router.add_get('/stock', handler.get_stock)
     app.router.add_get('/stock/summary', handler.get_stock_summary)
     
-    app.on_shutdown.append(close_all)
+    app.on_startup.append(startup)
+    app.on_shutdown.append(shutdown)
     
     return app
 
-async def close_all(app: web.Application) -> None:
+async def startup(app: web.Application) -> None:
+    """Инициализация при запуске"""
+    
+    if not await check_db_connection():
+        logger.error("БД недоступна!")
+        raise RuntimeError("Не удалось подключиться к базе данных")
+    logger.info("База данных доступна")
+    
+    await get_redis()
+    logger.info("Redis запущен")
+
+async def shutdown(app: web.Application) -> None:
+    """Завершение работы"""
+
     await close_db()
     await close_redis()
     logger.info("Все остановлено")
 
-
-async def startup() -> None:
-    """Инициализация при запуске"""
-
-    await get_db()
-    logger.info("База данных инициализирована")
-
-    await get_redis()
-    logger.info("Redis запущен")
-
-
-def main():
-    """Точка входа для uvicorn"""
-
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(startup())
-    
-    app = create_app()
-    return app
-
-
-app = main()
+app = create_app()
 
 if __name__ == '__main__':
-    import uvicorn
-    uvicorn.run(
-        "inventory_api.app:app",
-        host=config.host,
-        port=config.port,
-        log_level="info"
-    )
+    web.run_app(app, host=config.host, port=config.port)

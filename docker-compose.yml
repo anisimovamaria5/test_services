@@ -3,54 +3,101 @@ version: '3.8'
 services:
   postgres:
     image: postgres:14
+    container_name: postgres_db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: inventory
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
-      retries: 10 
+      retries: 10
+    networks:
+      - inventory_network
 
   redis:
     image: redis:7
+    container_name: redis_db
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - inventory_network
+
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrations
+    container_name: inventory_migrations
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/inventory
+      REDIS_URL: redis://redis:6379
+    command: alembic upgrade head
+    networks:
+      - inventory_network
+    restart: "no"
+
   inventory_api:
     build:
       context: . 
       dockerfile: Dockerfile.api
+    container_name: inventory_api
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
+      - migrations
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/inventory
       REDIS_URL: redis://redis:6379
     volumes:
-          - .:/app 
+      - ./inventory_api:/app/inventory_api  
+      - ./shared:/app/shared               
+    networks:
+      - inventory_network
+    restart: unless-stopped
+
   analytics_worker:
     build:
       context: . 
       dockerfile: Dockerfile.worker
+    container_name: analytics_worker
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
+      - migrations
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/inventory
       REDIS_URL: redis://redis:6379
     volumes:
-      - .:/app 
+      - ./analytics_worker:/app/analytics_worker  
+      - ./shared:/app/shared                    
+    networks:
+      - inventory_network
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  inventory_network:
+    driver: bridge

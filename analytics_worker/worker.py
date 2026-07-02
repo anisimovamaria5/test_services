@@ -1,6 +1,6 @@
 import asyncio
 
-from analytics_worker.database import close_db, get_db
+from shared.database import check_db_connection, close_db
 from analytics_worker.redis_pub import run_worker
 
 from shared.logger import get_logger
@@ -11,8 +11,9 @@ logger = get_logger(__name__)
 async def main():
     """Основная функция запуска воркера"""
     try:
-        await get_db()
-        logger.info("Worker: База данных инициализирована")
+        if not await check_db_connection():
+            logger.error("БД недоступна!")
+            raise RuntimeError("Database connection failed")
 
         await run_worker()
         

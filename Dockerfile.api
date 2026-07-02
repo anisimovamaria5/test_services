@@ -6,9 +6,13 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir -e .
 
 COPY inventory_api/ /app/inventory_api/
+COPY shared/ /app/shared/
+
+COPY alembic.ini /app/alembic.ini
+COPY migrations/ /app/migrations/
+COPY tests/ /app/tests/
 
 ENV PYTHONPATH=/app
 
-WORKDIR /app/inventory_api
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "inventory_api.app"]

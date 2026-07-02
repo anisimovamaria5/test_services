@@ -6,46 +6,40 @@
 
 ```bash
 test_services/
-├── docker-compose.yml # Docker Compose конфигурация
-├── requirements.txt # Зависимости Python
-├── README.md # Документация
-├── Dockerfile.api # Docker образ для API
-├── Dockerfile.worker # Docker образ для Worker
+├── docker-compose.yml      # Docker Compose конфигурация
+├── pyproject.toml          # Зависимости и метаданные проекта
+├── README.md               # Документация
+├── Dockerfile.api          # Docker образ для API
+├── Dockerfile.worker       # Docker образ для Worker
+├── Dockerfile.migrations   # Docker образ для миграций 
 │
-├── inventory_api/ # API сервис
-│ ├── init.py
-│ ├── app.py # Точка входа
-│ ├── config.py # Конфигурация
-│ ├── database.py # Работа с БД
-│ ├── handlers.py # HTTP-обработчики
-│ ├── models.py # Модели таблиц
-│ └── redis_pub.py # Redis publisher
-│ 
-├── analytics_worker/ # Worker сервис
-│ ├── init.py
-│ ├── worker.py # Точка входа
-│ ├── config.py # Конфигурация
-│ ├── database.py # Работа с БД
-│ ├── models.py # Модели таблиц
-│ └── redis_pub.py # Redis subscriber
+├── inventory_api/          # API сервис
+│   ├── __init__.py
+│   ├── app.py              # Точка входа
+│   ├── handlers.py         # HTTP-обработчики
+│   └── services/           # Бизнес-логика и репозитории
 │
-├── migrations/ # Миграции
-│ ├── init.py
-│ └── versions/
-│ └── 001_initial.py
+├── analytics_worker/       # Worker сервис
+│   ├── __init__.py
+│   ├── worker.py           # Точка входа
+│   └── services/           # Логика агрегации
 │
-├── dist/ # Собранный wheel
-│ └── inventory_services-1.0.0-py3-none-any.whl
+├── migrations/             # Миграции Alembic
+│   ├── __init__.py
+│   └── versions/
+│       └── 001_initial.py
 │
-├── tests/ # Тесты
-│ ├── init.py
-│ └── test_integration.py # Интеграционные тесты
-│ 
-└── shared/ # Общее
-  ├── init.py
-  ├── logger.py # Логгирование
-  └── schemas.py # Pydantic модели
-
+├── tests/                  # Интеграционные тесты
+│   ├── __init__.py
+│   └── test_integration.py
+│
+└── shared/                 # Общие модули 
+    ├── __init__.py
+    ├── config.py           # Конфигурация (Pydantic)
+    ├── database.py         # Подключение к БД и движок
+    ├── models.py           # Общие модели SQLAlchemy
+    ├── schemas.py          # Общие Pydantic схемы
+    └── logger.py           # Настройка логирования
 
 ```
 
@@ -111,7 +105,7 @@ docker-compose up --build
 docker-compose up -d
 
 # 4. Проверяем, что всё работает
-curl http://localhost:8080/
+curl http://localhost:8080/stock?warehouse=MAIN
 ```
 
 ### После запуска будут доступны:
@@ -170,11 +164,11 @@ curl "http://localhost:8080/stock/summary?top_n=5"
 ## 🧪 Тестирование
 
 ```bash
-# Установить зависимости для тестов
-pip install pytest pytest-asyncio asyncpg
+# Установить зависимости для тестов (если не установлены)
+pip install -e .[test]
 
-# Запустить тесты
-pytest tests/test_integration.py -v
+# Запустить интеграционные тесты с отчётом о покрытии
+pytest tests/test_integration.py -v --cov=./
 ```
 ### 🗄️ Миграции
 
@@ -186,7 +180,7 @@ pytest tests/test_integration.py -v
 pip install alembic
 
 # Создать новую миграцию
-alembic revision -m "create tables"
+alembic revision --autogenerate -m "create tables"
 
 # Применить миграции
 alembic upgrade head
