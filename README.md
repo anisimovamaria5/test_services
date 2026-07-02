@@ -27,7 +27,7 @@ test_services/
 ├── migrations/             # Миграции Alembic
 │   ├── __init__.py
 │   └── versions/
-│       └── 001_initial.py
+│       └── 2d6a3c518e6a_initial.py
 │
 ├── tests/                  # Интеграционные тесты
 │   ├── __init__.py
